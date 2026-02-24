@@ -1,0 +1,6 @@
+default_version = '1.0'
+superuser = false
+trusted = true
+relocatable = false
+schema = 'tasks'
+requires = 'plpgsql'
