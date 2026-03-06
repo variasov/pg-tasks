@@ -41,8 +41,15 @@ CREATE TABLE tasks.types (
     schema_name text NOT NULL,
     table_name text NOT NULL,
     timeout interval DEFAULT NULL,
+    notification_interval interval DEFAULT '1s',
     max_retries int DEFAULT 0,
     storage_time interval DEFAULT NULL
+);
+
+
+CREATE UNLOGGED TABLE tasks.last_notifications(
+    task_type integer REFERENCES tasks.types PRIMARY KEY,
+    last_notified_at time DEFAULT now()
 );
 
 
@@ -80,11 +87,36 @@ END;
 $FUNC$;
 
 
+CREATE OR REPLACE FUNCTION tasks.notify_workers() RETURNS TRIGGER
+LANGUAGE plpgsql AS $FUNC$
+BEGIN
+    INSERT INTO tasks.last_notifications(task_type)
+    SELECT id
+        FROM tasks.types
+        WHERE
+            schema_name = TG_TABLE_SCHEMA AND
+            table_name = TG_TABLE_NAME
+    ON CONFLICT (task_type) DO UPDATE
+        SET last_notified_at = now()
+        WHERE (
+            now()::time - tasks.last_notifications.last_notified_at
+        ) > TG_ARGV[0]::interval;
+
+    IF FOUND THEN
+        PERFORM pg_notify('pg_tasks', TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME);
+    END IF;
+
+    RETURN NEW;
+END;
+$FUNC$;
+
+
 CREATE FUNCTION tasks.register(
     schema_name text,
     table_name text,
     timeout interval DEFAULT NULL,
     max_retries int DEFAULT 0,
+    notification_interval interval DEFAULT '1s',
     storage_time interval DEFAULT NULL
 ) RETURNS VOID
 LANGUAGE plpgsql AS $$
@@ -101,6 +133,21 @@ BEGIN
         schema_name, table_name, timeout,
         max_retries, storage_time
     );
+
+    -- Create trigger for notifications
+    IF notification_interval IS NOT NULL THEN
+        EXECUTE format(
+            $QUERY$
+                CREATE TRIGGER notify_on_new
+                AFTER INSERT ON %1$I.%2$I
+                FOR EACH STATEMENT
+                EXECUTE FUNCTION tasks.notify_workers(%3$L);
+            $QUERY$,
+            schema_name,
+            table_name,
+            notification_interval
+        );
+    END IF;
 
     -- Create acquire func for task
     EXECUTE format(
@@ -339,6 +386,12 @@ BEGIN
 
     -- Remove stats view for task
     DROP VIEW IF EXISTS tasks.stats;
+
+    -- Remove notifications trigger
+    EXECUTE format(
+        'DROP TRIGGER IF EXISTS %s.%s.notify_on_new',
+       schema_name, table_name
+    );
 
     -- Remove stats view for task
     EXECUTE format(
