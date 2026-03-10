@@ -44,7 +44,7 @@ CREATE TABLE tasks.types (
     table_name text NOT NULL,
     timeout interval DEFAULT NULL,
     notification_interval interval DEFAULT '1s',
-    max_retries int DEFAULT 0,
+    max_retries int DEFAULT NULL,
     storage_time interval DEFAULT NULL
 );
 
@@ -74,7 +74,10 @@ BEGIN
         LOOP
             tasks_num := tasks_num - 1;
             sql = sql || format(
-                'SELECT %1$L AS table_name, * FROM tasks.stats_of_%1$I_%2$I',
+                $QUERY$
+                    SELECT '%1$s.%2$s' AS table_name, *
+                    FROM tasks.stats_of_%1$I_%2$I
+                $QUERY$,
                 task.schema_name,
                 task.table_name
             );
@@ -89,7 +92,7 @@ END;
 $FUNC$;
 
 
-CREATE OR REPLACE FUNCTION tasks.notify_workers() RETURNS TRIGGER
+CREATE OR REPLACE FUNCTION tasks.notify_workers_throttled() RETURNS TRIGGER
 LANGUAGE plpgsql AS $FUNC$
 BEGIN
     INSERT INTO tasks.last_notifications(task_type)
@@ -112,12 +115,20 @@ BEGIN
 END;
 $FUNC$;
 
+CREATE OR REPLACE FUNCTION tasks.notify_workers() RETURNS TRIGGER
+LANGUAGE plpgsql AS $FUNC$
+BEGIN
+    PERFORM pg_notify('pg_tasks', TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME);
+    RETURN NEW;
+END;
+$FUNC$;
+
 
 CREATE FUNCTION tasks.register(
     schema_name text,
     table_name text,
     timeout interval DEFAULT NULL,
-    max_retries int DEFAULT 0,
+    max_retries int DEFAULT NULL,
     notification_interval interval DEFAULT '1s',
     storage_time interval DEFAULT NULL
 ) RETURNS VOID
@@ -143,11 +154,22 @@ BEGIN
                 CREATE TRIGGER notify_on_new
                 AFTER INSERT ON %1$I.%2$I
                 FOR EACH STATEMENT
-                EXECUTE FUNCTION tasks.notify_workers(%3$L);
+                EXECUTE FUNCTION tasks.notify_workers_throttled(%3$L);
             $QUERY$,
             schema_name,
             table_name,
             notification_interval
+        );
+    ELSE
+        EXECUTE format(
+            $QUERY$
+                CREATE TRIGGER notify_on_new
+                AFTER INSERT ON %1$I.%2$I
+                FOR EACH STATEMENT
+                EXECUTE FUNCTION tasks.notify_workers();
+            $QUERY$,
+            schema_name,
+            table_name
         );
     END IF;
 
@@ -166,10 +188,14 @@ BEGIN
                     SELECT id
                     FROM %3$I.%4$I
                     WHERE
-                        finished_at IS NULL AND
-                        canceled IS NOT TRUE AND
-                        execution_count <= %5$s AND
-                        planned_to <= now() AND (
+                        finished_at IS NULL
+                        AND canceled IS NOT TRUE
+                        AND (
+                            %5$s IS NULL OR
+                            execution_count <= %5$s
+                        )
+                        AND planned_to <= now()
+                        AND (
                             started_at IS NULL OR
                             now() - started_at > %6$L
                         )
@@ -282,6 +308,7 @@ BEGIN
                     execution_count = 0,
                     canceled = False
                 WHERE id = task_id;
+                NOTIFY pg_tasks, '%3$I.%4$I';
             $FUNC$;
         $QUERY$,
         'tasks',
@@ -324,8 +351,7 @@ BEGIN
                 count(*) FILTER (WHERE completed_with_late) AS completed_with_late,
                 count(*) FILTER (WHERE canceled) AS canceled,
                 count(*) FILTER (WHERE not_started) AS not_started,
-                count(*) FILTER (WHERE timeout) AS timeout,
-                count(*) FILTER (WHERE outdated) AS outdated
+                count(*) FILTER (WHERE timeout) AS timeout
             FROM (
                 SELECT
                     id,
@@ -343,11 +369,11 @@ BEGIN
                         now() - started_at > %5$L
                     ) AS timeout,
                     (
+                        %5$L IS NOT NULL AND
                         started_at IS NOT NULL AND
                         finished_at IS NOT NULL AND
                         finished_at - started_at > %5$L
-                    ) completed_with_late,
-                    now() - created_at > %5$L AS outdated
+                    ) AS completed_with_late
                 FROM %3$I.%4$I
             ) AS tasks;
         $QUERY$,
