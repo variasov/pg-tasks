@@ -19,9 +19,17 @@
 - [Python](https://github.com/variasov/pg-tasks-python)
 
 
+## Установка 
+
+Сейчас доступен только вариант установки напрямую.
+
+Для установки напрямую нужно просто выполнить файл `pg_tasks/pg_tasks.sql`:
+```shell
+psql -f pg_tasks/pg_tasks.psql your_db
+```
+
 ## Quickstart
 
-### Установка
 Сначала надо установить расширение.
 
 ```sql
