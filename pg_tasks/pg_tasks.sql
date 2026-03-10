@@ -27,6 +27,8 @@ CREATE TABLE tasks.template (
     started_at timestamptz,
     finished_at timestamptz,
     execution_count int DEFAULT 0,
+    canceled bool,
+    trace_id uuid,
     comment TEXT
 );
 CREATE INDEX tasks_created_at ON tasks.template(created_at);
@@ -165,6 +167,7 @@ BEGIN
                     FROM %3$I.%4$I
                     WHERE
                         finished_at IS NULL AND
+                        canceled IS NOT TRUE AND
                         execution_count <= %5$s AND
                         planned_to <= now() AND (
                             started_at IS NULL OR
@@ -204,6 +207,7 @@ BEGIN
                     started_at = %2$s.started_at
                 WHERE
                     finished_at IS NULL AND
+                    canceled IS NOT TRUE AND
                     id = task_id;
             $FUNC$;
         $QUERY$,
@@ -230,11 +234,37 @@ BEGIN
                     planned_to = %2$s.planned_to
                 WHERE
                     finished_at IS NULL AND
+                    canceled IS NOT TRUE AND
                     id = task_id;
             $FUNC$;
         $QUERY$,
         'tasks',
         format('retry_%s_%s', schema_name, table_name),
+        schema_name,
+        table_name
+    );
+
+    -- Create cancel func for task
+    EXECUTE format(
+        $QUERY$
+            CREATE OR REPLACE FUNCTION
+            %1$s.%2$s(
+                task_id int,
+                planned_to timestamptz DEFAULT NULL,
+                comment text DEFAULT NULL
+            ) RETURNS VOID
+            LANGUAGE sql VOLATILE
+            AS $FUNC$
+                UPDATE %3$I.%4$I
+                SET
+                    canceled = TRUE
+                WHERE
+                    finished_at IS NULL AND
+                    id = task_id;
+            $FUNC$;
+        $QUERY$,
+        'tasks',
+        format('cancel_%s_%s', schema_name, table_name),
         schema_name,
         table_name
     );
@@ -249,7 +279,8 @@ BEGIN
                 SET
                     started_at = NULL,
                     finished_at = NULL,
-                    execution_count = 0
+                    execution_count = 0,
+                    canceled = False
                 WHERE id = task_id;
             $FUNC$;
         $QUERY$,
@@ -291,6 +322,7 @@ BEGIN
                 count(*) FILTER (WHERE completed) AS completed,
                 count(*) FILTER (WHERE completed AND retried) AS completed_with_retry,
                 count(*) FILTER (WHERE completed_with_late) AS completed_with_late,
+                count(*) FILTER (WHERE canceled) AS canceled,
                 count(*) FILTER (WHERE not_started) AS not_started,
                 count(*) FILTER (WHERE timeout) AS timeout,
                 count(*) FILTER (WHERE outdated) AS outdated
@@ -299,6 +331,7 @@ BEGIN
                     id,
                     planned_to > now() AS planned_to_future,
                     finished_at IS NOT NULL AS completed,
+                    canceled IS TRUE as canceled,
                     execution_count > 1 AS retried,
                     (
                         started_at IS NULL AND
@@ -369,6 +402,12 @@ BEGIN
     -- Remove retry func for task
     EXECUTE format(
         'DROP FUNCTION tasks.retry_%s_%s',
+        schema_name, table_name
+    );
+
+    -- Remove cancel func for task
+    EXECUTE format(
+        'DROP FUNCTION tasks.cancel_%s_%s',
         schema_name, table_name
     );
 
