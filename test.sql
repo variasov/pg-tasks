@@ -23,6 +23,20 @@ SELECT tasks.register(
     storage_time := '24:00:00'
 );
 
+-- Check for unregister, quickfix
+SELECT tasks.unregister(
+   schema_name := 'tasks',
+   table_name := 'do_something'
+);
+SELECT tasks.register(
+    schema_name := 'tasks',
+    table_name := 'do_something',
+    timeout := '00:01:00',
+    max_retries := 3,
+    storage_time := '24:00:00'
+);
+
+
 
 CREATE TABLE tasks.do_another(
     LIKE tasks.template

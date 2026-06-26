@@ -454,7 +454,7 @@ BEGIN
 
     -- Remove notifications trigger
     EXECUTE format(
-        'DROP TRIGGER IF EXISTS %s.%s.notify_on_new',
+        'DROP TRIGGER IF EXISTS notify_on_new ON %s.%s',
        schema_name, table_name
     );
 
