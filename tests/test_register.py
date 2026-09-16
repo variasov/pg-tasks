@@ -118,10 +118,6 @@ def test_unregister_idempotent(tasks_db):
         assert cur.fetchone()[0] is None
 
 
-@pytest.mark.xfail(
-    reason="unregister leaves registry row when a live notification row blocks the FK",
-    strict=False,
-)
 def test_unregister_after_live_notification(tasks_db):
     create_task_table(tasks_db, "job5")
     register_type(tasks_db, "job5", max_retries=1, timeout="00:01:00")

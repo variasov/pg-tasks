@@ -50,7 +50,7 @@ CREATE TABLE tasks.types (
 
 
 CREATE UNLOGGED TABLE tasks.last_notifications(
-    task_type integer REFERENCES tasks.types PRIMARY KEY,
+    task_type integer REFERENCES tasks.types(id) ON DELETE CASCADE PRIMARY KEY,
     last_notified_at time DEFAULT now()
 );
 
