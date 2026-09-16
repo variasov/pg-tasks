@@ -1,0 +1,37 @@
+# Test environment for pg-tasks.
+#
+# The official postgres image is used; the extension files from ./pg_tasks are
+# mounted straight into the server's extension directory, so CREATE EXTENSION
+# works without rebuilding the image.
+#
+# The pytest suite on the host connects to localhost:5433.
+#
+# Bring the DB up:
+#   docker compose up -d --wait
+#
+# Tear it down (removes data):
+#   docker compose down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pg_tasks_test
+    restart: "no"
+    environment:
+      POSTGRES_USER: tester
+      POSTGRES_PASSWORD: pg_tasks
+      POSTGRES_DB: pg_tasks
+    ports:
+      - "5433:5432"
+    volumes:
+      # Extension installation files (mounted individually so the rest of the
+      # image's extension directory, e.g. plpgsql, stays intact).
+      - ./pg_tasks/pg_tasks.control:/usr/local/share/postgresql/extension/pg_tasks.control:ro
+      - ./pg_tasks/pg_tasks--1.0.sql:/usr/local/share/postgresql/extension/pg_tasks--1.0.sql:ro
+      - ./pg_tasks/pg_tasks--1.0--1.1.sql:/usr/local/share/postgresql/extension/pg_tasks--1.0--1.1.sql:ro
+      - ./pg_tasks/pg_tasks.sql:/usr/local/share/postgresql/extension/pg_tasks.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tester -d pg_tasks"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
