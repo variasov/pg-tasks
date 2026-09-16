@@ -25,10 +25,6 @@ def test_register_creates_registry_row(tasks_db):
         assert cur.fetchone() == (timedelta(minutes=1), 3, timedelta(days=1))
 
 
-@pytest.mark.xfail(
-    reason="register() INSERT omits notification_interval, so the thick config is lost",
-    strict=False,
-)
 def test_register_persists_notification_interval(tasks_db):
     create_task_table(tasks_db, "job_ni")
     register_type(tasks_db, "job_ni", notification_interval="2s")
@@ -41,10 +37,6 @@ def test_register_persists_notification_interval(tasks_db):
         assert cur.fetchone()[0] == timedelta(seconds=2)
 
 
-@pytest.mark.xfail(
-    reason="register() formats NULL max_retries via %s, generating broken acquire SQL",
-    strict=False,
-)
 def test_register_defaults(tasks_db):
     create_task_table(tasks_db, "job_defaults")
     register_type(tasks_db, "job_defaults")
@@ -55,6 +47,11 @@ def test_register_defaults(tasks_db):
             "FROM tasks.types WHERE table_name = 'job_defaults'"
         )
         assert cur.fetchone() == (None, None, timedelta(seconds=1), None)
+
+        # NULL max_retries/timeout must not break the generated acquire function.
+        cur.execute("INSERT INTO tasks.job_defaults DEFAULT VALUES")
+        cur.execute("SELECT count(*) FROM tasks.acquire_tasks_job_defaults(1)")
+        assert cur.fetchone()[0] == 1
 
 
 def test_register_generates_workers(tasks_db):

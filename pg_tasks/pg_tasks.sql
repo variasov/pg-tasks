@@ -141,10 +141,10 @@ BEGIN
     -- Add entry with task parameters to tasks registry
     INSERT INTO tasks.types(
         schema_name, table_name, timeout,
-        max_retries, storage_time
+        notification_interval, max_retries, storage_time
     ) VALUES (
         schema_name, table_name, timeout,
-        max_retries, storage_time
+        notification_interval, max_retries, storage_time
     );
 
     -- Create trigger for notifications
@@ -191,8 +191,8 @@ BEGIN
                         finished_at IS NULL
                         AND canceled IS NOT TRUE
                         AND (
-                            %5$s IS NULL OR
-                            execution_count <= %5$s
+                            %5$L IS NULL OR
+                            execution_count < %5$L
                         )
                         AND planned_to <= now()
                         AND (
@@ -257,7 +257,7 @@ BEGIN
                 UPDATE %3$I.%4$I
                 SET
                     started_at = NULL,
-                    planned_to = %2$s.planned_to
+                    planned_to = COALESCE(%2$s.planned_to, now())
                 WHERE
                     finished_at IS NULL AND
                     canceled IS NOT TRUE AND

@@ -118,8 +118,6 @@ def test_retry_rearms_task(jobs):
         assert cur.fetchone() == (True, True)
 
 
-@pytest.mark.xfail(reason="retry with default NULL planned_to leaves planned_to NULL",
-                   strict=False)
 def test_retry_default_planned_to_rearms(jobs):
     task_id = insert_task(jobs, "jobs", payload="a")
     acquired(jobs)
@@ -177,8 +175,6 @@ def test_clean_removes_finished_after_storage_time(jobs):
         assert cur.fetchone()[0] == 0
 
 
-@pytest.mark.xfail(reason="max_retries acquire condition appears off by one",
-                   strict=False)
 def test_max_retries_bounds_acquires(jobs):
     """max_retries should cap the number of times a task can be acquired."""
     task_id = insert_task(jobs, "jobs", payload="a")
