@@ -1,6 +1,7 @@
 """Shared pytest fixtures and helpers for the pg-tasks suite."""
 
 import os
+import re
 from pathlib import Path
 
 import psycopg
@@ -9,6 +10,16 @@ import pytest
 DSN = os.environ.get("PG_TASKS_DSN", "postgresql://tester:pg_tasks@localhost:5433/pg_tasks")
 
 PG_TASKS_SQL = Path(__file__).resolve().parent.parent / "pg_tasks" / "pg_tasks.sql"
+PG_TASKS_CONTROL = Path(__file__).resolve().parent.parent / "pg_tasks" / "pg_tasks.control"
+
+
+def sql_default_version():
+    """Version that pg_tasks.control declares as the current default."""
+    text = PG_TASKS_CONTROL.read_text(encoding="utf-8")
+    match = re.search(r"^\s*default_version\s*=\s*'([^']+)'", text, re.MULTILINE)
+    if not match:
+        raise ValueError("default_version not found in pg_tasks.control")
+    return match.group(1)
 
 
 def _install_tasks(cur, method):

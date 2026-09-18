@@ -88,7 +88,7 @@ BEGIN
                             started_at IS NULL OR
                             now() - started_at > %6$L
                         )
-                    ORDER BY created_at DESC
+                    ORDER BY created_at ASC
                     LIMIT max_num
                     FOR UPDATE SKIP LOCKED
                 ) as acquired_tasks
@@ -276,6 +276,76 @@ BEGIN
     -- Remove stats view for task
     DROP VIEW IF EXISTS tasks.stats;
 
+    PERFORM tasks.create_stats_view();
+END
+$$;
+
+
+CREATE OR REPLACE FUNCTION tasks.unregister(
+    schema_name text,
+    table_name text
+) RETURNS VOID
+LANGUAGE plpgsql AS $$
+DECLARE
+    removed_entries int;
+BEGIN
+    -- Remove entry from tasks registry
+    WITH deleted AS (
+        DELETE FROM tasks.types WHERE
+            types.schema_name = unregister.schema_name AND
+            types.table_name = unregister.table_name
+        RETURNING id
+    )
+    SELECT count(*) INTO STRICT removed_entries FROM deleted;
+
+    -- Drop generated objects even when no registry entry was found, so an
+    -- interrupted register() cannot leave orphaned objects behind.
+    EXECUTE format(
+        'DROP FUNCTION IF EXISTS tasks.acquire_%s_%s',
+        schema_name, table_name
+    );
+
+    EXECUTE format(
+        'DROP FUNCTION IF EXISTS tasks.finish_%s_%s',
+        schema_name, table_name
+    );
+
+    EXECUTE format(
+        'DROP FUNCTION IF EXISTS tasks.retry_%s_%s',
+        schema_name, table_name
+    );
+
+    EXECUTE format(
+        'DROP FUNCTION IF EXISTS tasks.cancel_%s_%s',
+        schema_name, table_name
+    );
+
+    EXECUTE format(
+        'DROP FUNCTION IF EXISTS tasks.reset_%s_%s',
+        schema_name, table_name
+    );
+
+    EXECUTE format(
+        'DROP FUNCTION IF EXISTS tasks.clean_%s_%s',
+        schema_name, table_name
+    );
+
+    -- Remove stats view for task
+    DROP VIEW IF EXISTS tasks.stats;
+
+    -- Remove notifications trigger
+    EXECUTE format(
+        'DROP TRIGGER IF EXISTS notify_on_new ON %s.%s',
+        schema_name, table_name
+    );
+
+    -- Remove stats view for task
+    EXECUTE format(
+        'DROP VIEW IF EXISTS tasks.stats_of_%s_%s',
+        schema_name, table_name
+    );
+
+    -- Recreate generic stats view
     PERFORM tasks.create_stats_view();
 END
 $$;

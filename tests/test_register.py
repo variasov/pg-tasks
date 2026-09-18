@@ -124,3 +124,19 @@ def test_unregister_after_live_notification(tasks_db):
         cur.execute("SELECT tasks.unregister('tasks', 'job5')")
         cur.execute("SELECT count(*) FROM tasks.types WHERE table_name = 'job5'")
         assert cur.fetchone()[0] == 0
+
+
+def test_unregister_cleans_orphaned_objects(tasks_db):
+    """unregister drops generated objects even if the registry row is gone."""
+    create_task_table(tasks_db, "job6")
+    register_type(tasks_db, "job6", max_retries=1, timeout="00:01:00")
+
+    with tasks_db.cursor() as cur:
+        # Simulate an interrupted register(): remove the registry row but keep
+        # the generated functions.
+        cur.execute("DELETE FROM tasks.types WHERE table_name = 'job6'")
+        cur.execute("SELECT tasks.unregister('tasks', 'job6')")
+        cur.execute("SELECT to_regprocedure('tasks.acquire_tasks_job6(int)')")
+        assert cur.fetchone()[0] is None
+        cur.execute("SELECT to_regclass('tasks.stats_of_tasks_job6')")
+        assert cur.fetchone()[0] is None

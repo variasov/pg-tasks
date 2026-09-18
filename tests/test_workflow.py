@@ -55,6 +55,14 @@ def test_acquire_respects_limit_and_planned_to(jobs):
         assert rows[0][0] != id_future
 
 
+def test_acquire_returns_oldest_first(jobs):
+    old = insert_task(jobs, "jobs", payload="old")
+    new = insert_task(jobs, "jobs", payload="new")
+
+    rows = acquired(jobs, 1)
+    assert [r[0] for r in rows] == [old]
+
+
 def test_acquire_skips_locked_rows(committed_db):
     create_task_table(committed_db, "jobs")
     register_type(committed_db, "jobs", timeout="00:05:00", max_retries=3)
