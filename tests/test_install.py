@@ -1,13 +1,21 @@
 """Installation smoke tests: extension installs and exposes public objects."""
 
 
-def test_extension_schema_and_version(tasks_db):
-    with tasks_db.cursor() as cur:
+def test_extension_schema_and_version(tasks_db_extension):
+    with tasks_db_extension.cursor() as cur:
         cur.execute("SELECT extversion FROM pg_extension WHERE extname = 'pg_tasks'")
         assert cur.fetchone()[0] == "1.2"
 
-        cur.execute("SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname = 'pg_tasks'")
+        cur.execute(
+            "SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname = 'pg_tasks'"
+        )
         assert cur.fetchone()[0] == "tasks"
+
+
+def test_sql_install_does_not_require_extension(tasks_db_sql):
+    with tasks_db_sql.cursor() as cur:
+        cur.execute("SELECT count(*) FROM pg_extension WHERE extname = 'pg_tasks'")
+        assert cur.fetchone()[0] == 0
 
 
 def test_public_objects_exist(tasks_db):
@@ -23,7 +31,10 @@ def test_public_objects_exist(tasks_db):
             "tasks.notify_workers()",
             "tasks.notify_workers_throttled()",
         ):
-            cur.execute("SELECT to_regprocedure(%s) IS NOT NULL OR to_regclass(%s) IS NOT NULL", (func, func))
+            cur.execute(
+                "SELECT to_regprocedure(%s) IS NOT NULL OR to_regclass(%s) IS NOT NULL",
+                (func, func),
+            )
             assert cur.fetchone()[0], f"{func} must exist"
 
 
@@ -40,8 +51,15 @@ def test_template_columns(tasks_db):
         rows = cur.fetchall()
     cols = {name: (type_, nullable) for name, type_, nullable in rows}
     assert set(cols) == {
-        "id", "created_at", "planned_to", "started_at", "finished_at",
-        "execution_count", "canceled", "trace_id", "comment",
+        "id",
+        "created_at",
+        "planned_to",
+        "started_at",
+        "finished_at",
+        "execution_count",
+        "canceled",
+        "trace_id",
+        "comment",
     }
     assert cols["id"][0] == "integer"
 

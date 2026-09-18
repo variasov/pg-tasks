@@ -1,11 +1,30 @@
 """Shared pytest fixtures and helpers for the pg-tasks suite."""
 
 import os
+from pathlib import Path
 
 import psycopg
 import pytest
 
 DSN = os.environ.get("PG_TASKS_DSN", "postgresql://tester:pg_tasks@localhost:5433/pg_tasks")
+
+PG_TASKS_SQL = Path(__file__).resolve().parent.parent / "pg_tasks" / "pg_tasks.sql"
+
+
+def _install_tasks(cur, method):
+    """Install pg_tasks into a fresh `tasks` schema.
+
+    `extension` exercises the CREATE EXTENSION / migration path;
+    `sql` exercises the flat pg_tasks.sql installation path.
+    """
+    cur.execute("DROP SCHEMA IF EXISTS tasks CASCADE")
+    cur.execute("CREATE SCHEMA tasks")
+    if method == "extension":
+        cur.execute("CREATE EXTENSION pg_tasks SCHEMA tasks")
+    elif method == "sql":
+        cur.execute(PG_TASKS_SQL.read_text(encoding="utf-8"))
+    else:
+        raise ValueError(f"unknown install method: {method}")
 
 
 @pytest.fixture
@@ -18,29 +37,40 @@ def db():
     conn.close()
 
 
-@pytest.fixture
-def tasks_db(db):
-    """Connection with a fresh pg_tasks extension installed in schema `tasks`."""
+@pytest.fixture(params=["extension", "sql"], ids=["extension", "sql"])
+def tasks_db(db, request):
+    """Connection with pg_tasks installed in schema `tasks` via either method."""
     with db.cursor() as cur:
-        cur.execute("DROP SCHEMA IF EXISTS tasks CASCADE")
-        cur.execute("CREATE SCHEMA tasks")
-        cur.execute("CREATE EXTENSION pg_tasks SCHEMA tasks")
+        _install_tasks(cur, request.param)
     return db
 
 
 @pytest.fixture
-def committed_db():
-    """Autocommit connection with the extension installed, visible to other sessions.
+def tasks_db_extension(db):
+    """Connection with pg_tasks installed via CREATE EXTENSION only."""
+    with db.cursor() as cur:
+        _install_tasks(cur, "extension")
+    return db
+
+
+@pytest.fixture
+def tasks_db_sql(db):
+    """Connection with pg_tasks installed via the flat pg_tasks.sql only."""
+    with db.cursor() as cur:
+        _install_tasks(cur, "sql")
+    return db
+
+
+@pytest.fixture(params=["extension", "sql"], ids=["extension", "sql"])
+def committed_db(request):
+    """Autocommit connection with pg_tasks installed, visible to other sessions.
 
     Needed for tests involving two concurrent sessions (e.g. SKIP LOCKED),
     because uncommitted DDL is invisible to a second connection.
     """
     conn = psycopg.connect(DSN, autocommit=True)
     with conn.cursor() as cur:
-        cur.execute("DROP EXTENSION IF EXISTS pg_tasks CASCADE")
-        cur.execute("DROP SCHEMA IF EXISTS tasks CASCADE")
-        cur.execute("CREATE SCHEMA tasks")
-        cur.execute("CREATE EXTENSION pg_tasks SCHEMA tasks")
+        _install_tasks(cur, request.param)
     yield conn
     with conn.cursor() as cur:
         cur.execute("DROP EXTENSION IF EXISTS pg_tasks CASCADE")
