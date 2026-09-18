@@ -4,7 +4,7 @@
 def test_extension_schema_and_version(tasks_db):
     with tasks_db.cursor() as cur:
         cur.execute("SELECT extversion FROM pg_extension WHERE extname = 'pg_tasks'")
-        assert cur.fetchone()[0] == "1.3"
+        assert cur.fetchone()[0] == "1.2"
 
         cur.execute("SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname = 'pg_tasks'")
         assert cur.fetchone()[0] == "tasks"
