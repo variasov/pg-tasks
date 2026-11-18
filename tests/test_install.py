@@ -70,8 +70,8 @@ def _catalog_signature(cur):
 def test_extension_schema_and_version(tasks_db_extension):
     with tasks_db_extension.cursor() as cur:
         cur.execute("SELECT extversion FROM pg_extension WHERE extname = 'pg_tasks'")
-        assert cur.fetchone()[0] == "1.2"
-        assert _pg_tasks_version(cur) == "1.2"
+        assert cur.fetchone()[0] == "1.3"
+        assert _pg_tasks_version(cur) == "1.3"
         assert _pg_tasks_version(cur) == sql_default_version()
 
         cur.execute(
@@ -108,6 +108,44 @@ def test_sql_install_matches_extension_catalog():
         ext_conn.close()
 
     assert sql_sig == ext_sig
+
+
+def test_upgrade_1_2_to_1_3_regenerates_acquire(db):
+    """Types registered on 1.2 get the new acquire after ALTER EXTENSION UPDATE."""
+    with db.cursor() as cur:
+        cur.execute("DROP SCHEMA IF EXISTS tasks CASCADE")
+        cur.execute("CREATE SCHEMA tasks")
+        cur.execute("CREATE EXTENSION pg_tasks SCHEMA tasks VERSION '1.2'")
+        cur.execute(
+            "CREATE TABLE tasks.jobs (LIKE tasks.template INCLUDING DEFAULTS "
+            "INCLUDING IDENTITY INCLUDING INDEXES, payload text)"
+        )
+        cur.execute("SELECT tasks.register('tasks', 'jobs', '00:05:00', 3)")
+        cur.execute("SELECT prosrc FROM pg_proc WHERE proname = 'acquire_tasks_jobs'")
+        assert "ANY(ARRAY(" not in cur.fetchone()[0]
+
+        cur.execute("ALTER EXTENSION pg_tasks UPDATE TO '1.3'")
+
+        cur.execute("SELECT prosrc FROM pg_proc WHERE proname = 'acquire_tasks_jobs'")
+        src = cur.fetchone()[0]
+        assert "ANY(ARRAY(" in src
+        assert "'3'" in src and "'00:05:00'" in src
+
+        # Generated functions must stay user objects, not extension members.
+        cur.execute(
+            """
+            SELECT count(*) FROM pg_depend d JOIN pg_proc p ON p.oid = d.objid
+            WHERE d.deptype = 'e' AND p.proname = 'acquire_tasks_jobs'
+            """
+        )
+        assert cur.fetchone()[0] == 0
+
+        cur.execute("INSERT INTO tasks.jobs(payload) VALUES ('a')")
+        cur.execute("SELECT payload FROM tasks.acquire_tasks_jobs(10)")
+        assert cur.fetchall() == [("a",)]
+
+        # Re-registering after the upgrade still works.
+        cur.execute("SELECT tasks.register('tasks', 'jobs', '00:05:00', 3)")
 
 
 def test_public_objects_exist(tasks_db):

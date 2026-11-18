@@ -18,7 +18,7 @@
 
 ## Структура репозитория
 
-- `pg_tasks/pg_tasks.control` — метаданные расширения (версия `1.2`,
+- `pg_tasks/pg_tasks.control` — метаданные расширения (версия `1.3`,
   `relocatable = false`, `trusted = true`, схема `tasks`).
 - `pg_tasks/pg_tasks--1.0.sql` — полный скрипт версии 1.0 (устанавливается при
   `CREATE EXTENSION` в свежей БД).
@@ -26,6 +26,9 @@
 - `pg_tasks/pg_tasks--1.1--1.2.sql` — миграция 1.1 → 1.2 (FK cascade и
   исправления `register()`: `notification_interval`, NULL-безопасность,
   `max_retries`, `retry`).
+- `pg_tasks/pg_tasks--1.2--1.3.sql` — миграция 1.2 → 1.3 (`acquire` через
+  `id = ANY(ARRAY(...))` вместо `UPDATE ... FROM (подзапрос)`; перегенерирует
+  `acquire` для уже зарегистрированных типов).
 - `pg_tasks/pg_tasks.sql` — "плоский" скрипт для прямой установки (см. README).
 - `README.md` — документация (на русском).
 - `docker-compose.yml` — test PostgreSQL 16, монтирует исходники расширения в
@@ -105,6 +108,17 @@ fixture `committed_db` с autocommit.
 - Миграции должны быть идемпотентными насколько возможно (см. исправление
   `unregister` в `1.0--1.1`; FK `last_notifications` пересоздан с
   `ON DELETE CASCADE` в `1.1--1.2`; `register()` исправлен в `1.1--1.2`).
+- Если меняется текст генерируемых функций, миграция должна перегенерировать
+  их для типов из `tasks.types` и отвязать от расширения
+  (`ALTER EXTENSION pg_tasks DROP FUNCTION ...`): объекты, созданные скриптом
+  расширения, иначе становятся его членами, а созданные `register()` — нет.
+
+### Производительность `acquire`
+- SQL-функции исполняются по generic-плану, `max_num` планировщику неизвестен.
+  Форма `UPDATE t ... FROM (SELECT id ... LIMIT max_num) a WHERE t.id = a.id`
+  планируется как hash join с seq scan всей таблицы (на 10M строк ~2 с на
+  вызов). Используй `WHERE id = ANY(ARRAY(SELECT ...))` — всегда индекс по PK.
+  Регрессию ловит `test_acquire_does_not_scan_whole_table`.
 - `pg_tasks.sql` — плоская копия текущей версии, держи его в синхроне с
   актуальным `pg_tasks--<version>.sql` при правках.
 

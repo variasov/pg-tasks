@@ -197,3 +197,40 @@ def test_max_retries_bounds_acquires(jobs):
             cur.execute("SELECT tasks.retry_tasks_jobs(%s, now())", (task_id,))
 
     assert count == 3
+
+
+def test_acquire_does_not_scan_whole_table(jobs):
+    """acquire must touch only the selected rows, not the whole table.
+
+    The generic plan of the SQL function does not know max_num, so an
+    UPDATE ... FROM (subquery) form used to be planned as a hash join with
+    a sequential scan of the task table.
+    """
+    with jobs.cursor() as cur:
+        cur.execute(
+            "INSERT INTO tasks.jobs(payload) "
+            "SELECT 'p' || g FROM generate_series(1, 20000) g"
+        )
+        cur.execute("ANALYZE tasks.jobs")
+        cur.execute("LOAD 'auto_explain'")
+        cur.execute("SET auto_explain.log_min_duration = 0")
+        cur.execute("SET auto_explain.log_nested_statements = on")
+        cur.execute("SET auto_explain.log_level = notice")
+        cur.execute("SET plan_cache_mode = force_generic_plan")
+
+        notices = []
+        jobs.add_notice_handler(lambda diag: notices.append(diag.message_primary))
+        cur.execute("SELECT id FROM tasks.acquire_tasks_jobs(10)")
+        assert len(cur.fetchall()) == 10
+
+    plans = "\n".join(n for n in notices if "acquire" in n or "Update on" in n)
+    assert "Update on jobs" in plans, plans
+    assert "Seq Scan" not in plans, plans
+
+
+def test_acquire_returns_full_rows(jobs):
+    task_id = insert_task(jobs, "jobs", payload="hello")
+    with jobs.cursor() as cur:
+        cur.execute("SELECT id, payload, execution_count, started_at IS NOT NULL "
+                    "FROM tasks.acquire_tasks_jobs(1)")
+        assert cur.fetchall() == [(task_id, "hello", 1, True)]

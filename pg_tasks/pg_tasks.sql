@@ -184,7 +184,7 @@ BEGIN
                 SET
                     execution_count = execution_count + 1,
                     started_at = now()
-                FROM (
+                WHERE id = ANY(ARRAY(
                     SELECT id
                     FROM %3$I.%4$I
                     WHERE
@@ -202,9 +202,8 @@ BEGIN
                     ORDER BY created_at ASC
                     LIMIT max_num
                     FOR UPDATE SKIP LOCKED
-                ) as acquired_tasks
-                WHERE %3$I.%4$I.id = acquired_tasks.id
-                RETURNING %3$I.%4$I.*
+                ))
+                RETURNING *
             $FUNC$;
         $QUERY$,
         'tasks',
